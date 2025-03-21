@@ -2,11 +2,16 @@ import cv2
 import subprocess
 import time
 import os
-from ADB import capture_screen, check_device_connected, adb_path,  device_id
+import ADB
 
-# テンプレート画像を探す関数
-def find_template_position(template_path, threshold=0.8):
-    if not capture_screen():
+
+
+def find_template_position(template_path, threshold=0.6):
+    """
+    テンプレート画像（template_path）の位置を、現在の画面キャプチャ上から探し、
+    マッチした位置（画像中央: (x, y)）を返します。
+    """
+    if not ADB.capture_screen():
         print("キャプチャに失敗しました。")
         return None
     screen = cv2.imread("screen.png")
@@ -19,90 +24,90 @@ def find_template_position(template_path, threshold=0.8):
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
     if max_val >= threshold:
-        # 画像中央の座標を計算
+        # テンプレートの中央座標を計算
         template_height, template_width = template.shape[:2]
         center_x = max_loc[0] + template_width // 2
         center_y = max_loc[1] + template_height // 2
-        return (center_x, center_y)  # 中央の座標を返す
+        return (center_x, center_y)
     else:
+        print(f"[INFO] テンプレートの類似度が閾値（{threshold}）に達していません。（max_val: {max_val}）")
         return None
 
-# 実機上でタッチ操作を実行する関数
+
 def tap_on_device(x, y):
-    if not check_device_connected():
+    if not ADB.check_device_connected():
         return False
-    # adbコマンドでタッチ操作を実行
-    subprocess.run([adb_path, "-s", device_id, "shell", f"input tap {x} {y}"])
+    command = [
+        ADB.adb_path,
+        "-s",
+        ADB.device_id,
+        "shell",
+        "input",
+        "swipe",
+        str(x),
+        str(y),
+        str(x),
+        str(y),
+        "100"  # 100ミリ秒でスワイプ（タップをエミュレート）
+    ]
+    subprocess.run(command)
+    print(f"[INFO] 座標 ({x}, {y}) に swipe(タップエミュレート) を実行しました。")
     return True
+
+
 
 def tap_button_with_retry(template_path, wait_time=2):
     """
-    ボタンが見つからない場合、見つかるまで再試行する関数
+    指定のテンプレート画像を探し、見つかるまで無限に再試行しタップします。
     """
     while True:
         position = find_template_position(template_path)
         if position:
             tap_on_device(position[0], position[1])
-            time.sleep(1)  # 少し待機
+            time.sleep(1)
             return True
         else:
-            print(f"{template_path} が見つかりませんでした。再試行します...")
-            time.sleep(wait_time)  # 再試行の前に待機
+            print(f"[INFO] {template_path} が見つかりませんでした。再試行します...")
+            time.sleep(wait_time)
+
 
 def tap_button_with_retry_restricted(template_path, wait_time=2, max_retries=3):
     """
-    ボタンが見つからない場合、指定された回数まで再試行する関数。
-    見つからない場合はスキップ。
+    指定のテンプレート画像を探し、最大試行回数内で再試行しタップを試みます。
+    見つからなければ False を返します。
     """
-    retries = 0  # 試行回数をカウントする
-
+    retries = 0
     while retries < max_retries:
         position = find_template_position(template_path)
         if position:
             tap_on_device(position[0], position[1])
-            time.sleep(1)  # 少し待機
+            time.sleep(1)
             return True
         else:
             retries += 1
-            print(f"{template_path} が見つかりませんでした。再試行します... (試行回数: {retries}/{max_retries})")
-            time.sleep(wait_time)  # 再試行の前に待機
-
-    print(f"{template_path} が見つからないため、スキップします。")
+            print(f"[INFO] {template_path} が見つかりませんでした。（試行回数: {retries}/{max_retries}）")
+            time.sleep(wait_time)
+    print(f"[INFO] {template_path} が見つからなかったためスキップします。")
     return False
 
 
 def tap_sequence_with_retry(sequence, max_retries=3, wait_time=2):
     """
-    一連の画像ボタンを順番に検出してタップする。
-    途中でボタンが見つからなければ終了。
-
-    Args:
-        sequence (list): 画像パスのリスト。順番に処理される。
-        max_retries (int): 各画像の検出を試行する最大回数。
-        wait_time (float): 再試行の間隔（秒）。
-
-    Returns:
-        bool: 全ての画像が正常にタップできた場合は True、失敗した場合は False。
+    複数の画像パス（sequence）を順番に検出し、全てタップできれば True を返します。
+    途中の画像が見つからなければシーケンス処理を中断し False を返します。
     """
     for img_path in sequence:
         if not tap_button_with_retry_restricted(img_path, wait_time, max_retries):
-            print(f"{img_path} が見つからないため、シーケンスを中断します。")
+            print(f"[ERROR] {img_path} が見つからなかったためシーケンスを中断します。")
             return False
     return True
 
 
-# スクロール操作を実行する関数
 def scroll_on_device(start_x, start_y, end_x, end_y, duration=300):
-    """
-    start_x, start_y: スクロール開始の座標
-    end_x, end_y: スクロール終了の座標
-    duration: スクロールにかける時間（ミリ秒単位）
-    """
-    if not check_device_connected():
+    if not ADB.check_device_connected():
         return False
-    # adbコマンドでドラッグ操作（スクロール）を実行
-    subprocess.run(
-        [adb_path, "-s", device_id, "shell", "input", "swipe", str(start_x), str(start_y), str(end_x), str(end_y),
-         str(duration)])
+    subprocess.run([ADB.adb_path, "-s", ADB.device_id, "shell", "input", "swipe",
+                    str(start_x), str(start_y), str(end_x), str(end_y), str(duration)])
+    print(f"[INFO] 座標 ({start_x}, {start_y}) から ({end_x}, {end_y}) へのスクロールを実行しました。")
     return True
 
