@@ -94,7 +94,7 @@ def next_process():
                         (SAITOUROKU3_PATH, SAITOUROKU3_TAP_COORD),
                         (SAITOUROKU4_PATH, SAITOUROKU4_TAP_COORD)]:
         while True:
-            position = find_template_position(path, threshold=0.4)
+            position = find_template_position(path, threshold=0.8)
             if position:
                 print(f"[INFO] {path} が検出されました。")
                 tap_on_device(*coord)
